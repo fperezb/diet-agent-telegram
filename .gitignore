@@ -1,0 +1,56 @@
+# Archivos de entorno
+.env
+.env.local
+.env.production
+
+# Archivos temporales
+temp_photos/
+*.tmp
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Base de datos (si se agrega en el futuro)
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos de respaldo
+*.bak
+*.backup
+
+# Archivos de testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribución
+dist/
+build/
+*.egg-info/
