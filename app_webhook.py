@@ -292,6 +292,36 @@ def test_bot():
             "error": str(e)
         }), 500
 
+@app.route('/send_test_message/<chat_id>', methods=['GET'])
+def send_test_message(chat_id):
+    """Enviar mensaje de prueba a un chat específico"""
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        async def send_message():
+            await diet_agent.bot.send_message(
+                chat_id=int(chat_id),
+                text="🤖 ¡Mensaje de prueba desde el servidor!\n\nSi recibes esto, la conexión funciona correctamente."
+            )
+            return True
+        
+        result = loop.run_until_complete(send_message())
+        loop.close()
+        
+        return jsonify({
+            "status": "message_sent",
+            "chat_id": chat_id
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error enviando mensaje de prueba: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
 @app.route('/set_webhook', methods=['GET'])
 def set_webhook():
     """Configurar webhook de Telegram"""
