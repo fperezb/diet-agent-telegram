@@ -263,10 +263,7 @@ def debug_env():
 def test_bot():
     """Endpoint para probar que el bot funciona"""
     try:
-        # Obtener información del bot
         import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         
         async def get_bot_info():
             bot_info = await diet_agent.bot.get_me()
@@ -277,8 +274,18 @@ def test_bot():
                 "can_read_all_group_messages": bot_info.can_read_all_group_messages
             }
         
+        # Crear y ejecutar el loop de manera segura
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
         bot_data = loop.run_until_complete(get_bot_info())
-        loop.close()
         
         return jsonify({
             "status": "bot_connected",
@@ -327,8 +334,6 @@ def webhook_info():
     """Obtener información del webhook configurado"""
     try:
         import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         
         async def get_webhook_info():
             webhook_info = await diet_agent.bot.get_webhook_info()
@@ -342,8 +347,18 @@ def webhook_info():
                 "allowed_updates": webhook_info.allowed_updates
             }
         
+        # Crear y ejecutar el loop de manera segura
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
         webhook_data = loop.run_until_complete(get_webhook_info())
-        loop.close()
         
         return jsonify({
             "status": "success",
@@ -366,8 +381,23 @@ def set_webhook():
         if not webhook_url:
             return jsonify({"error": "WEBHOOK_URL no configurada"}), 400
         
-        # Configurar webhook
-        response = diet_agent.bot.set_webhook(url=f"{webhook_url}/webhook")
+        import asyncio
+        
+        async def configure_webhook():
+            return await diet_agent.bot.set_webhook(url=f"{webhook_url}/webhook")
+        
+        # Crear y ejecutar el loop de manera segura
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        response = loop.run_until_complete(configure_webhook())
         
         if response:
             return jsonify({
