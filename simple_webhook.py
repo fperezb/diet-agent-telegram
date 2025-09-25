@@ -92,18 +92,54 @@ def send_message(chat_id, text):
     except Exception as e:
         logger.error(f"Error en send_message: {e}")
 
+@app.route('/delete_webhook', methods=['GET'])
+def delete_webhook():
+    """Eliminar webhook existente"""
+    try:
+        url = f"{TELEGRAM_API_URL}/deleteWebhook"
+        response = requests.post(url)
+        
+        if response.status_code == 200:
+            return jsonify({"status": "success", "message": "Webhook eliminado"}), 200
+        else:
+            return jsonify({"error": response.text}), 500
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/set_webhook', methods=['GET'])
 def set_webhook():
     """Configurar webhook"""
     try:
         webhook_url = os.getenv('WEBHOOK_URL')
+        if not webhook_url:
+            return jsonify({"error": "WEBHOOK_URL no configurada"}), 400
+            
         url = f"{TELEGRAM_API_URL}/setWebhook"
         data = {"url": f"{webhook_url}/webhook"}
         
+        logger.info(f"🔧 Configurando webhook: {webhook_url}/webhook")
         response = requests.post(url, json=data)
+        logger.info(f"🔧 Respuesta de Telegram: {response.text}")
         
         if response.status_code == 200:
             return jsonify({"status": "success", "message": f"Webhook configurado en {webhook_url}/webhook"}), 200
+        else:
+            return jsonify({"error": response.text}), 500
+            
+    except Exception as e:
+        logger.error(f"❌ Error configurando webhook: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/webhook_info', methods=['GET'])
+def webhook_info():
+    """Ver información del webhook actual"""
+    try:
+        url = f"{TELEGRAM_API_URL}/getWebhookInfo"
+        response = requests.get(url)
+        
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
         else:
             return jsonify({"error": response.text}), 500
             
