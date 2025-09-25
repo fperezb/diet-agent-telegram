@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 import requests
 
 # Configurar logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Cargar variables de entorno
@@ -22,6 +25,9 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+logger.info(f"Bot token configurado: {'Sí' if BOT_TOKEN else 'No'}")
+logger.info(f"URL de la API: {TELEGRAM_API_URL[:50]}...")
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "healthy", "version": "simple"}), 200
@@ -30,30 +36,40 @@ def health():
 def webhook():
     """Webhook simple que responde a todos los mensajes"""
     try:
+        logger.info("🔵 Webhook endpoint llamado")
         update = request.get_json()
-        logger.info(f"Update recibido: {update}")
+        logger.info(f"📨 Update recibido: {update}")
         
         if update and 'message' in update:
             chat_id = update['message']['chat']['id']
             message_text = update['message'].get('text', '')
+            user_info = update['message'].get('from', {})
             
-            logger.info(f"Mensaje: '{message_text}' de chat: {chat_id}")
+            logger.info(f"💬 Mensaje: '{message_text}' de chat: {chat_id}, usuario: {user_info.get('username', 'sin_username')}")
             
             # Respuesta simple
             if message_text.startswith('/start'):
                 response_text = "¡Hola! 👋 Soy tu Diet Agent.\n\nEnvíame una foto de comida y te ayudo con las calorías."
+                logger.info("🚀 Procesando comando /start")
             elif message_text.startswith('/help'):
                 response_text = "Comandos:\n/start - Iniciar\n/help - Ayuda\n\nEnvía fotos de comida para análisis."
+                logger.info("❓ Procesando comando /help")
             else:
                 response_text = "📸 Envíame una foto de tu comida para analizarla."
+                logger.info("📝 Procesando mensaje de texto")
             
             # Enviar respuesta
+            logger.info(f"📤 Enviando respuesta a chat {chat_id}")
             send_message(chat_id, response_text)
+        else:
+            logger.warning("⚠️ Update sin mensaje válido")
         
         return jsonify({"ok": True}), 200
         
     except Exception as e:
-        logger.error(f"Error en webhook: {e}")
+        logger.error(f"❌ Error en webhook: {e}")
+        import traceback
+        logger.error(f"🔍 Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 def send_message(chat_id, text):
