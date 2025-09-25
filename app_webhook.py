@@ -37,9 +37,12 @@ app = Flask(__name__)
 
 class DietAgentWebhook:
     def __init__(self):
+        self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not self.bot_token:
+            raise ValueError("TELEGRAM_BOT_TOKEN no está configurada en las variables de entorno")
+        
         self.food_analyzer = FoodAnalyzer()
         self.calorie_calculator = CalorieCalculator()
-        self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.bot = Bot(self.bot_token)
         
         # Configurar la aplicación de Telegram
@@ -221,6 +224,16 @@ def health_check():
         "status": "healthy",
         "service": "Diet Agent Webhook",
         "version": "1.0.0"
+    }), 200
+
+@app.route('/debug', methods=['GET'])
+def debug_env():
+    """Debug endpoint para verificar variables de entorno"""
+    return jsonify({
+        "telegram_token_set": bool(os.getenv('TELEGRAM_BOT_TOKEN')),
+        "openai_key_set": bool(os.getenv('OPENAI_API_KEY')),
+        "webhook_url_set": bool(os.getenv('WEBHOOK_URL')),
+        "port": os.getenv('PORT', 'not_set')
     }), 200
 
 @app.route('/set_webhook', methods=['GET'])

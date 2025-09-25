@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 class FoodAnalyzer:
     def __init__(self):
         """Inicializar el analizador de alimentos"""
-        self.client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY no está configurada en las variables de entorno")
+        self.client = OpenAI(api_key=api_key)
         
         # Prompt optimizado para análisis de alimentos
         self.system_prompt = """
