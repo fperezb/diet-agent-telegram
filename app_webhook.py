@@ -21,6 +21,7 @@ from threading import Thread
 
 from food_analyzer import FoodAnalyzer
 from calorie_calculator import CalorieCalculator
+from diet_database import DietDatabase
 
 # Configurar logging
 logging.basicConfig(
@@ -55,6 +56,7 @@ class DietAgentWebhook:
         
         self.food_analyzer = FoodAnalyzer()
         self.calorie_calculator = CalorieCalculator()
+        self.database = DietDatabase()
         self.bot = Bot(self.bot_token)
         
         # Configurar la aplicación de Telegram
@@ -202,8 +204,23 @@ class DietAgentWebhook:
                 # Calcular calorías
                 calorie_info = self.calorie_calculator.calculate_calories(food_analysis)
                 
-                # Generar respuesta
-                response = self._format_analysis_response(food_analysis, calorie_info)
+                # Guardar en base de datos
+                try:
+                    meal_id = self.database.save_meal(
+                        user_id=user_id,
+                        foods=food_analysis.get('foods', []),
+                        total_calories=calorie_info['total_calories'],
+                        photo_file_id=photo.file_id
+                    )
+                    logger.info(f"Comida guardada en BD: meal_id={meal_id}")
+                except Exception as e:
+                    logger.error(f"Error guardando comida en BD: {e}")
+                
+                # Obtener total diario actualizado
+                daily_stats = self.database.get_daily_calories(user_id)
+                
+                # Generar respuesta con totales diarios
+                response = self._format_analysis_response(food_analysis, calorie_info, daily_stats)
                 
                 # Eliminar mensaje de procesando
                 await processing_msg.delete()
@@ -228,7 +245,7 @@ class DietAgentWebhook:
                 "Por favor, intenta nuevamente."
             )
     
-    def _format_analysis_response(self, food_analysis, calorie_info):
+    def _format_analysis_response(self, food_analysis, calorie_info, daily_stats=None):
         """Formatear la respuesta del análisis"""
         response = "🍽️ *Análisis de tu comida:*\n\n"
         
@@ -237,7 +254,14 @@ class DietAgentWebhook:
         for food in food_analysis.get('foods', []):
             response += f"• {food['name']} ({food['confidence']:.0%})\n"
         
-        response += f"\n🔥 *Calorías totales estimadas:* {calorie_info['total_calories']} kcal\n\n"
+        response += f"\n🔥 *Esta comida:* {calorie_info['total_calories']} kcal\n"
+        
+        # Agregar totales diarios si están disponibles
+        if daily_stats and daily_stats.get('total_calories', 0) > 0:
+            response += f"📊 *Total del día:* {daily_stats['total_calories']} kcal\n"
+            response += f"🍽️ *Comidas registradas hoy:* {daily_stats['meal_count']}\n"
+        
+        response += "\n"
         
         # Desglose nutricional
         if calorie_info.get('breakdown'):
@@ -260,15 +284,40 @@ class DietAgentWebhook:
         if not self.is_user_authorized(user_id):
             await self.send_unauthorized_message(update)
             return
+        
+        try:
+            # Obtener estadísticas reales de la base de datos
+            daily_stats = self.database.get_daily_calories(user_id)
             
-        stats_text = (
-            "📊 *Estadísticas de hoy:*\n\n"
-            "🔥 Calorías totales: 0 kcal\n"
-            "🍽️ Comidas analizadas: 0\n"
-            "⏰ Última comida: --:--\n\n"
-            "🌐 Servido desde la nube ☁️\n"
-            "💡 ¡Envía fotos de tus comidas para ver tus estadísticas!"
-        )
+            stats_text = f"📊 *Estadísticas de hoy:*\n\n"
+            stats_text += f"🔥 *Calorías totales:* {daily_stats['total_calories']} kcal\n"
+            stats_text += f"🍽️ *Comidas analizadas:* {daily_stats['meal_count']}\n"
+            
+            if daily_stats['last_meal_time']:
+                stats_text += f"⏰ *Última comida:* {daily_stats['last_meal_time']}\n"
+            else:
+                stats_text += f"⏰ *Última comida:* --:--\n"
+            
+            # Mostrar desglose de comidas si hay
+            if daily_stats['meals']:
+                stats_text += f"\n📝 *Detalle del día:*\n"
+                for i, meal in enumerate(daily_stats['meals'], 1):
+                    stats_text += f"{i}. *{meal['time']}h* - {meal['calories']} kcal\n"
+                    stats_text += f"   {meal['foods']}\n"
+            
+            stats_text += f"\n🌐 Servido desde la nube ☁️"
+            
+            if daily_stats['meal_count'] == 0:
+                stats_text += f"\n💡 ¡Envía fotos de tus comidas para empezar a trackear!"
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {e}")
+            stats_text = (
+                "📊 *Estadísticas de hoy:*\n\n"
+                "❌ Error cargando datos\n"
+                "Intenta nuevamente en un momento"
+            )
+            
         await update.message.reply_text(stats_text, parse_mode='Markdown')
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
