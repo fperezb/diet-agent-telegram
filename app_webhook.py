@@ -41,6 +41,18 @@ class DietAgentWebhook:
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN no está configurada en las variables de entorno")
         
+        # Cargar IDs de usuarios autorizados
+        allowed_ids_str = os.getenv('ALLOWED_USER_IDS', '')
+        self.allowed_user_ids = set()
+        if allowed_ids_str:
+            try:
+                self.allowed_user_ids = set(int(id.strip()) for id in allowed_ids_str.split(',') if id.strip())
+                logger.info(f"Usuarios autorizados cargados: {len(self.allowed_user_ids)} usuarios")
+            except ValueError as e:
+                logger.error(f"Error parsing ALLOWED_USER_IDS: {e}")
+        else:
+            logger.warning("ALLOWED_USER_IDS no configurada - el bot estará abierto a todos los usuarios")
+        
         self.food_analyzer = FoodAnalyzer()
         self.calorie_calculator = CalorieCalculator()
         self.bot = Bot(self.bot_token)
@@ -68,6 +80,29 @@ class DietAgentWebhook:
             self._initialized = False
             logger.info("Bot y aplicación cerrados correctamente")
     
+    def is_user_authorized(self, user_id: int) -> bool:
+        """Verificar si el usuario está autorizado para usar el bot"""
+        # Si no hay lista de usuarios autorizados, permitir a todos
+        if not self.allowed_user_ids:
+            return True
+        return user_id in self.allowed_user_ids
+    
+    async def send_unauthorized_message(self, update: Update):
+        """Enviar mensaje cuando el usuario no está autorizado"""
+        unauthorized_msg = (
+            "🚫 *Acceso no autorizado*\n\n"
+            "Lo siento, no tienes permisos para usar este bot.\n"
+            "Si crees que esto es un error, contacta al administrador.\n\n"
+            f"Tu ID de usuario: `{update.effective_user.id}`"
+        )
+        try:
+            await update.message.reply_text(unauthorized_msg, parse_mode='Markdown')
+        except Exception:
+            # Fallback sin markdown
+            await update.message.reply_text(unauthorized_msg.replace('*', '').replace('`', ''))
+        
+        logger.warning(f"Usuario no autorizado intentó acceder: {update.effective_user.id} (@{update.effective_user.username})")
+    
     def _setup_handlers(self):
         """Configurar handlers del bot"""
         self.application.add_handler(CommandHandler("start", self.start))
@@ -78,7 +113,13 @@ class DietAgentWebhook:
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Comando /start - Mensaje de bienvenida"""
-        logger.info(f"Comando /start recibido de usuario: {update.effective_user.id}")
+        user_id = update.effective_user.id
+        logger.info(f"Comando /start recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
         
         welcome_message = (
             "¡Hola! 👋 Soy tu Agente Dietético personal\n\n"
@@ -100,6 +141,14 @@ class DietAgentWebhook:
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Comando /help - Instrucciones de uso"""
+        user_id = update.effective_user.id
+        logger.info(f"Comando /help recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+            
         help_text = (
             "🤖 *Cómo usar el Diet Agent:*\n\n"
             "1. Envía una foto de tu comida 📸\n"
@@ -119,6 +168,14 @@ class DietAgentWebhook:
     
     async def analyze_food_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Analizar foto de comida enviada por el usuario"""
+        user_id = update.effective_user.id
+        logger.info(f"Foto recibida de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+            
         try:
             # Enviar mensaje de "procesando"
             processing_msg = await update.message.reply_text(
@@ -196,6 +253,14 @@ class DietAgentWebhook:
     
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Mostrar estadísticas del día"""
+        user_id = update.effective_user.id
+        logger.info(f"Comando /stats recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+            
         stats_text = (
             "📊 *Estadísticas de hoy:*\n\n"
             "🔥 Calorías totales: 0 kcal\n"
@@ -208,6 +273,14 @@ class DietAgentWebhook:
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Manejar mensajes de texto"""
+        user_id = update.effective_user.id
+        logger.info(f"Mensaje de texto recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+            
         await update.message.reply_text(
             "📸 Por favor, envía una foto de tu comida para analizarla.\n"
             "Si necesitas ayuda, usa /help"
@@ -284,6 +357,8 @@ def debug_env():
         "telegram_token_set": bool(os.getenv('TELEGRAM_BOT_TOKEN')),
         "openai_key_set": bool(os.getenv('OPENAI_API_KEY')),
         "webhook_url_set": bool(os.getenv('WEBHOOK_URL')),
+        "allowed_users_set": bool(os.getenv('ALLOWED_USER_IDS')),
+        "allowed_users_count": len(diet_agent.allowed_user_ids),
         "port": os.getenv('PORT', 'not_set')
     }), 200
 
