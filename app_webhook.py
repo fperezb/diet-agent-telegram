@@ -677,6 +677,40 @@ def debug_env():
         "port": os.getenv('PORT', 'not_set')
     }), 200
 
+@app.route('/database_stats', methods=['GET'])
+def database_stats():
+    """Endpoint para verificar estadísticas de la base de datos"""
+    try:
+        stats = diet_agent.database.get_database_stats()
+        return jsonify({
+            "status": "success",
+            "database_stats": stats,
+            "purge_info": {
+                "retention_months": 2,
+                "description": "Datos más antiguos de 2 meses son eliminados automáticamente"
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error", 
+            "error": str(e)
+        }), 500
+
+@app.route('/purge_old_data', methods=['POST'])
+def manual_purge():
+    """Endpoint para ejecutar purga manual (solo para mantenimiento)"""
+    try:
+        purge_result = diet_agent.database.purge_old_data(months_to_keep=2)
+        return jsonify({
+            "status": "success",
+            "purge_result": purge_result
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
 @app.route('/test_bot', methods=['GET'])
 def test_bot():
     """Endpoint para probar que el bot funciona"""

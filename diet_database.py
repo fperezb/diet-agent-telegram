@@ -59,6 +59,12 @@ class DietDatabase:
                 conn.commit()
                 logger.info("Base de datos inicializada correctamente")
                 
+            # Ejecutar purga automática de datos antiguos
+            purge_result = self.purge_old_data(months_to_keep=2)
+            if purge_result['success'] and purge_result['meals_deleted'] > 0:
+                logger.info(f"Purga automática: eliminadas {purge_result['meals_deleted']} "
+                           f"comidas anteriores a {purge_result['cutoff_date']}")
+                
         except Exception as e:
             logger.error(f"Error inicializando base de datos: {e}")
             raise
@@ -505,6 +511,127 @@ class DietDatabase:
             return {
                 "has_goal": False,
                 "message": "Error al verificar tu meta. Intenta nuevamente."
+            }
+
+    def purge_old_data(self, months_to_keep: int = 2) -> Dict:
+        """
+        Purgar datos antiguos manteniendo solo los últimos N meses
+        
+        Args:
+            months_to_keep: Número de meses hacia atrás a mantener (default: 2)
+            
+        Returns:
+            Dict con información de la purga realizada
+        """
+        try:
+            today = date.today()
+            
+            # Calcular fecha límite (hace N meses)
+            if today.month > months_to_keep:
+                cutoff_date = today.replace(month=today.month - months_to_keep, day=1)
+            else:
+                # Si estamos en enero o febrero y queremos mantener 2+ meses
+                months_back = months_to_keep - today.month
+                cutoff_date = today.replace(
+                    year=today.year - 1, 
+                    month=12 - months_back,
+                    day=1
+                )
+            
+            cutoff_str = cutoff_date.isoformat()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Contar registros a eliminar antes de borrarlos
+                cursor.execute('''
+                    SELECT COUNT(*) FROM meals WHERE date < ?
+                ''', (cutoff_str,))
+                meals_to_delete = cursor.fetchone()[0]
+                
+                # Obtener usuarios afectados para logging
+                cursor.execute('''
+                    SELECT DISTINCT user_id FROM meals WHERE date < ?
+                ''', (cutoff_str,))
+                affected_users = [row[0] for row in cursor.fetchall()]
+                
+                # Eliminar registros antiguos de meals
+                cursor.execute('DELETE FROM meals WHERE date < ?', (cutoff_str,))
+                meals_deleted = cursor.rowcount
+                
+                # También limpiar configuraciones de usuarios que ya no tienen datos
+                cursor.execute('''
+                    DELETE FROM user_config 
+                    WHERE user_id NOT IN (SELECT DISTINCT user_id FROM meals)
+                ''')
+                configs_deleted = cursor.rowcount
+                
+                conn.commit()
+                
+                logger.info(f"Purga completada: {meals_deleted} comidas eliminadas, "
+                           f"{configs_deleted} configuraciones huérfanas eliminadas. "
+                           f"Fecha límite: {cutoff_str}")
+                
+                return {
+                    "success": True,
+                    "cutoff_date": cutoff_str,
+                    "meals_deleted": meals_deleted,
+                    "configs_deleted": configs_deleted,
+                    "affected_users": len(affected_users),
+                    "months_kept": months_to_keep
+                }
+                
+        except Exception as e:
+            logger.error(f"Error en purga de datos: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "meals_deleted": 0,
+                "configs_deleted": 0
+            }
+    
+    def get_database_stats(self) -> Dict:
+        """Obtener estadísticas generales de la base de datos"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Contar total de comidas
+                cursor.execute('SELECT COUNT(*) FROM meals')
+                total_meals = cursor.fetchone()[0]
+                
+                # Contar usuarios únicos
+                cursor.execute('SELECT COUNT(DISTINCT user_id) FROM meals')
+                total_users = cursor.fetchone()[0]
+                
+                # Obtener rango de fechas
+                cursor.execute('SELECT MIN(date), MAX(date) FROM meals')
+                date_range = cursor.fetchone()
+                
+                # Contar configuraciones
+                cursor.execute('SELECT COUNT(*) FROM user_config')
+                total_configs = cursor.fetchone()[0]
+                
+                # Tamaño de la BD (aproximado)
+                cursor.execute("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()")
+                db_size = cursor.fetchone()[0] if cursor.fetchone() else 0
+                
+                return {
+                    "total_meals": total_meals,
+                    "total_users": total_users,
+                    "total_configs": total_configs,
+                    "oldest_record": date_range[0] if date_range[0] else None,
+                    "newest_record": date_range[1] if date_range[1] else None,
+                    "database_size_bytes": db_size
+                }
+                
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas de BD: {e}")
+            return {
+                "total_meals": 0,
+                "total_users": 0,
+                "total_configs": 0,
+                "error": str(e)
             }
 
     def delete_user_data(self, user_id: int):
