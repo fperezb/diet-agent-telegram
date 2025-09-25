@@ -211,6 +211,132 @@ class DietDatabase:
                 "daily_breakdown": []
             }
     
+    def get_monthly_summary(self, user_id: int, target_month: date = None) -> Dict:
+        """
+        Obtener resumen mensual completo para un usuario
+        
+        Args:
+            user_id: ID del usuario
+            target_month: Mes objetivo (por defecto el mes actual)
+            
+        Returns:
+            Dict con estadísticas mensuales completas
+        """
+        if target_month is None:
+            target_month = date.today()
+        
+        # Primer y último día del mes
+        month_start = target_month.replace(day=1)
+        if month_start.month == 12:
+            month_end = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            month_end = month_start.replace(month=month_start.month + 1, day=1)
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Obtener datos diarios del mes
+                cursor.execute('''
+                    SELECT date, SUM(total_calories) as daily_calories, COUNT(*) as daily_meals
+                    FROM meals 
+                    WHERE user_id = ? AND date >= ? AND date < ?
+                    GROUP BY date
+                    ORDER BY date
+                ''', (user_id, month_start.isoformat(), month_end.isoformat()))
+                
+                daily_data = cursor.fetchall()
+                
+                # Calcular estadísticas generales
+                total_calories = sum(day[1] for day in daily_data)
+                total_meals = sum(day[2] for day in daily_data)
+                days_with_data = len(daily_data)
+                
+                # Obtener meta del usuario
+                user_goal = self.get_user_goal(user_id)
+                daily_goal = user_goal['daily_calorie_goal'] if user_goal else None
+                
+                # Estadísticas avanzadas
+                daily_calories = [day[1] for day in daily_data] if daily_data else []
+                avg_daily_calories = total_calories / days_with_data if days_with_data > 0 else 0
+                
+                # Días sobre/bajo meta
+                days_over_goal = 0
+                days_under_goal = 0
+                days_on_target = 0
+                total_goal_calories = 0
+                
+                if daily_goal:
+                    total_goal_calories = daily_goal * days_with_data
+                    for day_calories in daily_calories:
+                        if day_calories > daily_goal * 1.1:  # 10% margen
+                            days_over_goal += 1
+                        elif day_calories < daily_goal * 0.9:  # 10% margen
+                            days_under_goal += 1
+                        else:
+                            days_on_target += 1
+                
+                # Encontrar mejor y peor día
+                best_day = None
+                worst_day = None
+                if daily_data and daily_goal:
+                    # Mejor día: más cercano a la meta sin excederla mucho
+                    best_day = min(daily_data, key=lambda x: abs(x[1] - daily_goal))
+                    # Peor día: más alejado de la meta
+                    worst_day = max(daily_data, key=lambda x: abs(x[1] - daily_goal))
+                
+                return {
+                    "month": month_start.strftime("%Y-%m"),
+                    "month_name": month_start.strftime("%B %Y"),
+                    "days_in_month": (month_end - month_start).days,
+                    "days_tracked": days_with_data,
+                    "total_calories": total_calories,
+                    "total_meals": total_meals,
+                    "avg_daily_calories": round(avg_daily_calories, 1),
+                    "daily_goal": daily_goal,
+                    "total_goal_calories": total_goal_calories,
+                    "goal_performance": {
+                        "days_over": days_over_goal,
+                        "days_under": days_under_goal,
+                        "days_on_target": days_on_target,
+                        "success_rate": round((days_on_target / days_with_data * 100), 1) if days_with_data > 0 else 0
+                    },
+                    "best_day": {
+                        "date": best_day[0],
+                        "calories": best_day[1],
+                        "meals": best_day[2]
+                    } if best_day else None,
+                    "worst_day": {
+                        "date": worst_day[0],
+                        "calories": worst_day[1], 
+                        "meals": worst_day[2]
+                    } if worst_day else None,
+                    "daily_breakdown": [
+                        {
+                            "date": day[0],
+                            "calories": day[1],
+                            "meals": day[2],
+                            "vs_goal": day[1] - daily_goal if daily_goal else None,
+                            "goal_percentage": round((day[1] / daily_goal * 100), 1) if daily_goal else None
+                        }
+                        for day in daily_data
+                    ]
+                }
+                
+        except Exception as e:
+            logger.error(f"Error obteniendo resumen mensual: {e}")
+            return {
+                "month": target_month.strftime("%Y-%m"),
+                "month_name": target_month.strftime("%B %Y"),
+                "days_in_month": 0,
+                "days_tracked": 0,
+                "total_calories": 0,
+                "total_meals": 0,
+                "avg_daily_calories": 0,
+                "daily_goal": None,
+                "daily_breakdown": []
+            }
+    
     def set_daily_goal(self, user_id: int, calorie_goal: int, weight_goal: str = None) -> bool:
         """
         Establecer la meta diaria de calorías para un usuario

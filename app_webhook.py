@@ -18,6 +18,7 @@ from telegram.ext import (
 from dotenv import load_dotenv
 import asyncio
 from threading import Thread
+from datetime import datetime
 
 from food_analyzer import FoodAnalyzer
 from calorie_calculator import CalorieCalculator
@@ -111,6 +112,7 @@ class DietAgentWebhook:
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("setmeta", self.set_goal_command))
+        self.application.add_handler(CommandHandler("mensual", self.monthly_stats_command))
         self.application.add_handler(MessageHandler(filters.PHOTO, self.analyze_food_photo))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
     
@@ -164,7 +166,8 @@ class DietAgentWebhook:
             "/start - Iniciar el bot\n"
             "/help - Mostrar esta ayuda\n"
             "/stats - Ver estadísticas de hoy\n"
-            "/setmeta - Configurar meta diaria de calorías\n\n"
+            "/setmeta - Configurar meta diaria de calorías\n"
+            "/mensual - Ver reporte del mes actual\n\n"
             "🌐 Bot ejecutándose en modo webhook\n"
             "¡Disfruta de una alimentación más consciente! 🌟"
         )
@@ -477,6 +480,126 @@ class DietAgentWebhook:
             await update.message.reply_text(
                 "❌ Ocurrió un error. Intenta nuevamente."
             )
+    
+    async def monthly_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /mensual - Mostrar estadísticas del mes"""
+        user_id = update.effective_user.id
+        logger.info(f"Comando /mensual recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+        
+        try:
+            # Enviar mensaje de procesando (puede ser lenta la consulta)
+            processing_msg = await update.message.reply_text("📊 Generando reporte mensual... ⏳")
+            
+            # Obtener estadísticas mensuales
+            monthly_stats = self.database.get_monthly_summary(user_id)
+            
+            # Formatear respuesta
+            response = self._format_monthly_response(monthly_stats)
+            
+            # Actualizar mensaje
+            await processing_msg.edit_text(response, parse_mode='Markdown')
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas mensuales: {e}")
+            await processing_msg.edit_text(
+                "❌ Error generando el reporte mensual.\n"
+                "Intenta nuevamente en un momento."
+            )
+    
+    def _format_monthly_response(self, stats: dict) -> str:
+        """Formatear el reporte mensual"""
+        response = f"📊 *Reporte Mensual - {stats['month_name']}*\n\n"
+        
+        # Resumen general
+        response += f"📅 *Días rastreados:* {stats['days_tracked']}/{stats['days_in_month']}\n"
+        response += f"🔥 *Total consumido:* {stats['total_calories']:,} kcal\n"
+        response += f"🍽️ *Total de comidas:* {stats['total_meals']}\n"
+        response += f"📈 *Promedio diario:* {stats['avg_daily_calories']} kcal\n"
+        
+        # Información de meta si existe
+        if stats.get('daily_goal'):
+            goal = stats['daily_goal']
+            total_goal = stats.get('total_goal_calories', 0)
+            performance = stats.get('goal_performance', {})
+            
+            response += f"\n🎯 *Meta vs Realidad:*\n"
+            response += f"• Meta diaria: {goal} kcal\n"
+            response += f"• Meta mensual: {total_goal:,} kcal\n"
+            
+            if total_goal > 0:
+                surplus_deficit = stats['total_calories'] - total_goal
+                if surplus_deficit > 0:
+                    response += f"• Exceso: +{surplus_deficit:,} kcal 📈\n"
+                else:
+                    response += f"• Déficit: {surplus_deficit:,} kcal 📉\n"
+            
+            response += f"\n📊 *Cumplimiento de Meta:*\n"
+            response += f"• Días en meta: {performance.get('days_on_target', 0)} 💚\n"
+            response += f"• Días sobre meta: {performance.get('days_over', 0)} 🔴\n"
+            response += f"• Días bajo meta: {performance.get('days_under', 0)} 🔵\n"
+            response += f"• Tasa de éxito: {performance.get('success_rate', 0)}% ✨\n"
+        
+        # Mejor y peor día
+        if stats.get('best_day') and stats.get('worst_day'):
+            best = stats['best_day']
+            worst = stats['worst_day']
+            
+            response += f"\n🏆 *Mejor día:* {best['date']}\n"
+            response += f"   {best['calories']} kcal ({best['meals']} comidas)\n"
+            response += f"😰 *Día más desafiante:* {worst['date']}\n"
+            response += f"   {worst['calories']} kcal ({worst['meals']} comidas)\n"
+        
+        # Tendencia (últimos 7 días con datos)
+        recent_days = stats['daily_breakdown'][-7:] if len(stats['daily_breakdown']) >= 7 else stats['daily_breakdown']
+        if recent_days:
+            response += f"\n📈 *Últimos días:*\n"
+            for day in recent_days[-5:]:  # Solo últimos 5 días para no saturar
+                date_obj = datetime.fromisoformat(day['date'])
+                day_name = date_obj.strftime("%d/%m")
+                
+                # Indicador visual según meta
+                if day.get('goal_percentage'):
+                    percentage = day['goal_percentage']
+                    if percentage < 90:
+                        indicator = "🔵"
+                    elif percentage <= 110:
+                        indicator = "💚"
+                    else:
+                        indicator = "🔴"
+                else:
+                    indicator = "⚪"
+                
+                response += f"• {day_name}: {day['calories']} kcal {indicator}\n"
+        
+        # Consejos basados en los datos
+        response += f"\n💡 *Análisis:*\n"
+        
+        if stats['days_tracked'] < stats['days_in_month'] / 2:
+            response += "• Intenta registrar más días para un mejor seguimiento\n"
+        
+        if stats.get('daily_goal'):
+            success_rate = stats.get('goal_performance', {}).get('success_rate', 0)
+            if success_rate >= 70:
+                response += "• ¡Excelente consistencia con tu meta! 👏\n"
+            elif success_rate >= 50:
+                response += "• Buen progreso, sigue mejorando la consistencia\n"
+            else:
+                response += "• Considera ajustar tu meta o mejorar la planificación\n"
+        
+        avg_meals = stats['total_meals'] / stats['days_tracked'] if stats['days_tracked'] > 0 else 0
+        if avg_meals < 2.5:
+            response += "• Considera registrar todas tus comidas del día\n"
+        elif avg_meals > 4:
+            response += "• ¡Buen registro de todas las comidas! 📸\n"
+        
+        response += f"\n🌐 Generado desde la nube"
+        
+        return response
     
     async def process_update(self, update_data):
         """Procesar update de Telegram"""
