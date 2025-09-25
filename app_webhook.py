@@ -110,6 +110,7 @@ class DietAgentWebhook:
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
+        self.application.add_handler(CommandHandler("setmeta", self.set_goal_command))
         self.application.add_handler(MessageHandler(filters.PHOTO, self.analyze_food_photo))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
     
@@ -162,7 +163,8 @@ class DietAgentWebhook:
             "*Comandos disponibles:*\n"
             "/start - Iniciar el bot\n"
             "/help - Mostrar esta ayuda\n"
-            "/stats - Ver estadísticas de hoy\n\n"
+            "/stats - Ver estadísticas de hoy\n"
+            "/setmeta - Configurar meta diaria de calorías\n\n"
             "🌐 Bot ejecutándose en modo webhook\n"
             "¡Disfruta de una alimentación más consciente! 🌟"
         )
@@ -204,6 +206,9 @@ class DietAgentWebhook:
                 # Calcular calorías
                 calorie_info = self.calorie_calculator.calculate_calories(food_analysis)
                 
+                # Verificar meta calórica ANTES de guardar
+                goal_check = self.database.check_calorie_limit(user_id, calorie_info['total_calories'])
+                
                 # Guardar en base de datos
                 try:
                     meal_id = self.database.save_meal(
@@ -219,8 +224,8 @@ class DietAgentWebhook:
                 # Obtener total diario actualizado
                 daily_stats = self.database.get_daily_calories(user_id)
                 
-                # Generar respuesta con totales diarios
-                response = self._format_analysis_response(food_analysis, calorie_info, daily_stats)
+                # Generar respuesta con totales diarios y alertas de meta
+                response = self._format_analysis_response(food_analysis, calorie_info, daily_stats, goal_check)
                 
                 # Eliminar mensaje de procesando
                 await processing_msg.delete()
@@ -245,7 +250,7 @@ class DietAgentWebhook:
                 "Por favor, intenta nuevamente."
             )
     
-    def _format_analysis_response(self, food_analysis, calorie_info, daily_stats=None):
+    def _format_analysis_response(self, food_analysis, calorie_info, daily_stats=None, goal_check=None):
         """Formatear la respuesta del análisis"""
         response = "🍽️ *Análisis de tu comida:*\n\n"
         
@@ -260,6 +265,26 @@ class DietAgentWebhook:
         if daily_stats and daily_stats.get('total_calories', 0) > 0:
             response += f"📊 *Total del día:* {daily_stats['total_calories']} kcal\n"
             response += f"🍽️ *Comidas registradas hoy:* {daily_stats['meal_count']}\n"
+        
+        # Agregar información de meta y alertas
+        if goal_check and goal_check.get('has_goal'):
+            response += f"\n🎯 *Meta diaria:* {goal_check['daily_goal']} kcal\n"
+            response += f"📈 *Progreso:* {goal_check['projected_percentage']}% de tu meta\n"
+            
+            if goal_check['remaining_calories'] > 0:
+                response += f"✨ *Calorías restantes:* {goal_check['remaining_calories']} kcal\n"
+            
+            # Mensaje de alerta según el estado
+            response += f"\n{goal_check['message']}\n"
+            
+            # Consejos adicionales según el estado
+            if goal_check['status'] == 'exceed':
+                response += "\n💡 *Consejos:*\n"
+                response += "• Considera comidas más ligeras el resto del día\n"
+                response += "• Aumenta tu actividad física\n"
+                response += "• Bebe más agua para sentirte saciado\n"
+            elif goal_check['status'] == 'warning':
+                response += "\n💡 Planifica bien tus próximas comidas para mantenerte en meta.\n"
         
         response += "\n"
         
@@ -289,8 +314,39 @@ class DietAgentWebhook:
             # Obtener estadísticas reales de la base de datos
             daily_stats = self.database.get_daily_calories(user_id)
             
+            # Obtener meta del usuario
+            user_goal = self.database.get_user_goal(user_id)
+            
             stats_text = f"📊 *Estadísticas de hoy:*\n\n"
-            stats_text += f"🔥 *Calorías totales:* {daily_stats['total_calories']} kcal\n"
+            stats_text += f"🔥 *Calorías consumidas:* {daily_stats['total_calories']} kcal\n"
+            
+            # Mostrar información de meta si existe
+            if user_goal:
+                goal_calories = user_goal['daily_calorie_goal']
+                percentage = (daily_stats['total_calories'] / goal_calories) * 100 if goal_calories > 0 else 0
+                remaining = max(0, goal_calories - daily_stats['total_calories'])
+                
+                stats_text += f"🎯 *Meta diaria:* {goal_calories} kcal\n"
+                stats_text += f"📈 *Progreso:* {percentage:.1f}%\n"
+                
+                if remaining > 0:
+                    stats_text += f"✨ *Calorías restantes:* {remaining} kcal\n"
+                else:
+                    excess = daily_stats['total_calories'] - goal_calories
+                    stats_text += f"⚠️ *Exceso:* {excess} kcal\n"
+                
+                # Indicador visual del progreso
+                if percentage < 50:
+                    stats_text += f"📊 {'█' * int(percentage/10)}{'░' * (10-int(percentage/10))} 💚\n"
+                elif percentage < 80:
+                    stats_text += f"📊 {'█' * int(percentage/10)}{'░' * (10-int(percentage/10))} 💛\n"
+                elif percentage < 100:
+                    stats_text += f"📊 {'█' * int(percentage/10)}{'░' * (10-int(percentage/10))} 🧡\n"
+                else:
+                    stats_text += f"📊 {'█' * 10} 🔴\n"
+            else:
+                stats_text += f"🎯 *Meta:* No configurada (usa /setmeta)\n"
+            
             stats_text += f"🍽️ *Comidas analizadas:* {daily_stats['meal_count']}\n"
             
             if daily_stats['last_meal_time']:
@@ -309,6 +365,9 @@ class DietAgentWebhook:
             
             if daily_stats['meal_count'] == 0:
                 stats_text += f"\n💡 ¡Envía fotos de tus comidas para empezar a trackear!"
+            
+            if not user_goal:
+                stats_text += f"\n🎯 Usa /setmeta para establecer tu objetivo diario"
             
         except Exception as e:
             logger.error(f"Error obteniendo estadísticas: {e}")
@@ -334,6 +393,90 @@ class DietAgentWebhook:
             "📸 Por favor, envía una foto de tu comida para analizarla.\n"
             "Si necesitas ayuda, usa /help"
         )
+    
+    async def set_goal_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /setmeta - Establecer meta diaria de calorías"""
+        user_id = update.effective_user.id
+        logger.info(f"Comando /setmeta recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+        
+        # Verificar si se proporcionó la meta
+        args = context.args
+        if not args:
+            help_text = (
+                "🎯 *Configurar Meta Diaria*\n\n"
+                "*Uso:* `/setmeta [calorías]`\n\n"
+                "*Ejemplos:*\n"
+                "• `/setmeta 2000` - Meta de 2000 kcal/día\n"
+                "• `/setmeta 1800` - Meta de 1800 kcal/día\n\n"
+                "*Guías generales:*\n"
+                "• Mantenimiento: 2000-2500 kcal\n"
+                "• Pérdida de peso: 1500-2000 kcal\n"
+                "• Ganancia muscular: 2500-3000 kcal\n\n"
+                "💡 Consulta a un nutricionista para metas personalizadas"
+            )
+            await update.message.reply_text(help_text, parse_mode='Markdown')
+            return
+        
+        try:
+            # Parsear la meta de calorías
+            calorie_goal = int(args[0])
+            
+            # Validar rango razonable
+            if calorie_goal < 800 or calorie_goal > 5000:
+                await update.message.reply_text(
+                    "⚠️ Meta fuera del rango saludable (800-5000 kcal).\n"
+                    "Por favor, ingresa una meta más realista."
+                )
+                return
+            
+            # Guardar en base de datos
+            success = self.database.set_daily_goal(user_id, calorie_goal)
+            
+            if success:
+                # Obtener estadísticas actuales para mostrar progreso
+                daily_stats = self.database.get_daily_calories(user_id)
+                current_calories = daily_stats['total_calories']
+                percentage = (current_calories / calorie_goal) * 100 if calorie_goal > 0 else 0
+                
+                response = (
+                    f"🎯 *Meta establecida exitosamente*\n\n"
+                    f"📊 *Meta diaria:* {calorie_goal} kcal\n"
+                    f"🔥 *Consumo actual:* {current_calories} kcal ({percentage:.1f}%)\n"
+                    f"📈 *Restante:* {max(0, calorie_goal - current_calories)} kcal\n\n"
+                )
+                
+                if percentage < 50:
+                    response += "💚 ¡Vas muy bien! Tienes margen para más comidas."
+                elif percentage < 80:
+                    response += "💛 Buen progreso, mantén el control de las porciones."
+                elif percentage < 100:
+                    response += "🧡 Te acercas a tu meta, ¡cuidado con las próximas comidas!"
+                else:
+                    response += "🔴 Ya superaste tu meta de hoy. ¡Mañana será mejor!"
+                
+                response += f"\n\nAhora recibirás alertas cuando una comida pueda hacerte exceder tu meta. 🚨"
+                
+                await update.message.reply_text(response, parse_mode='Markdown')
+            else:
+                await update.message.reply_text(
+                    "❌ Error guardando tu meta. Intenta nuevamente."
+                )
+                
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Por favor, ingresa un número válido de calorías.\n"
+                "Ejemplo: `/setmeta 2000`"
+            )
+        except Exception as e:
+            logger.error(f"Error en comando setmeta: {e}")
+            await update.message.reply_text(
+                "❌ Ocurrió un error. Intenta nuevamente."
+            )
     
     async def process_update(self, update_data):
         """Procesar update de Telegram"""
