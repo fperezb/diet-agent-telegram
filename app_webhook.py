@@ -322,6 +322,42 @@ def send_test_message(chat_id):
             "error": str(e)
         }), 500
 
+@app.route('/webhook_info', methods=['GET'])
+def webhook_info():
+    """Obtener información del webhook configurado"""
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        async def get_webhook_info():
+            webhook_info = await diet_agent.bot.get_webhook_info()
+            return {
+                "url": webhook_info.url,
+                "has_custom_certificate": webhook_info.has_custom_certificate,
+                "pending_update_count": webhook_info.pending_update_count,
+                "last_error_date": webhook_info.last_error_date.isoformat() if webhook_info.last_error_date else None,
+                "last_error_message": webhook_info.last_error_message,
+                "max_connections": webhook_info.max_connections,
+                "allowed_updates": webhook_info.allowed_updates
+            }
+        
+        webhook_data = loop.run_until_complete(get_webhook_info())
+        loop.close()
+        
+        return jsonify({
+            "status": "success",
+            "webhook_info": webhook_data,
+            "expected_webhook_url": f"{os.getenv('WEBHOOK_URL', 'NOT_SET')}/webhook"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo información del webhook: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
 @app.route('/set_webhook', methods=['GET'])
 def set_webhook():
     """Configurar webhook de Telegram"""
