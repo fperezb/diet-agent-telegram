@@ -51,11 +51,22 @@ class DietAgentWebhook:
         self._initialized = False
     
     async def initialize(self):
-        """Inicializar la aplicación de manera asíncrona"""
+        """Inicializar la aplicación y bot de manera asíncrona"""
         if not self._initialized:
+            # Inicializar el bot primero
+            await self.bot.initialize()
+            # Luego inicializar la aplicación
             await self.application.initialize()
             self._initialized = True
-            logger.info("Aplicación de Telegram inicializada correctamente")
+            logger.info("Bot y aplicación de Telegram inicializados correctamente")
+    
+    async def shutdown(self):
+        """Cerrar recursos de manera limpia"""
+        if self._initialized:
+            await self.application.shutdown()
+            await self.bot.shutdown()
+            self._initialized = False
+            logger.info("Bot y aplicación cerrados correctamente")
     
     def _setup_handlers(self):
         """Configurar handlers del bot"""
@@ -283,6 +294,8 @@ def test_bot():
         import asyncio
         
         async def get_bot_info():
+            # Asegurar que el bot esté inicializado
+            await diet_agent.initialize()
             bot_info = await diet_agent.bot.get_me()
             return {
                 "bot_username": bot_info.username,
@@ -353,6 +366,8 @@ def webhook_info():
         import asyncio
         
         async def get_webhook_info():
+            # Asegurar que el bot esté inicializado
+            await diet_agent.initialize()
             webhook_info = await diet_agent.bot.get_webhook_info()
             return {
                 "url": webhook_info.url,
@@ -401,6 +416,8 @@ def set_webhook():
         import asyncio
         
         async def configure_webhook():
+            # Asegurar que el bot esté inicializado
+            await diet_agent.initialize()
             return await diet_agent.bot.set_webhook(url=f"{webhook_url}/webhook")
         
         # Crear y ejecutar el loop de manera segura
