@@ -48,6 +48,14 @@ class DietAgentWebhook:
         # Configurar la aplicación de Telegram
         self.application = ApplicationBuilder().token(self.bot_token).build()
         self._setup_handlers()
+        self._initialized = False
+    
+    async def initialize(self):
+        """Inicializar la aplicación de manera asíncrona"""
+        if not self._initialized:
+            await self.application.initialize()
+            self._initialized = True
+            logger.info("Aplicación de Telegram inicializada correctamente")
     
     def _setup_handlers(self):
         """Configurar handlers del bot"""
@@ -197,6 +205,9 @@ class DietAgentWebhook:
     async def process_update(self, update_data):
         """Procesar update de Telegram"""
         try:
+            # Asegurar que la aplicación esté inicializada
+            await self.initialize()
+            
             logger.info(f"Procesando update: {update_data}")
             update = Update.de_json(update_data, self.bot)
             
@@ -222,18 +233,24 @@ def webhook():
         
         # Procesar el update de forma síncrona pero rápida
         if update_data:
-            # Crear un nuevo loop para esta request
             import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            
+            # Crear y ejecutar el loop de manera segura
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             
             try:
                 # Procesar el update
                 loop.run_until_complete(diet_agent.process_update(update_data))
             except Exception as e:
                 logger.error(f"Error procesando update: {e}")
-            finally:
-                loop.close()
         
         return jsonify({"status": "ok"}), 200
     except Exception as e:
