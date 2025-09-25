@@ -59,6 +59,8 @@ class DietAgentWebhook:
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Comando /start - Mensaje de bienvenida"""
+        logger.info(f"Comando /start recibido de usuario: {update.effective_user.id}")
+        
         welcome_message = (
             "¡Hola! 👋 Soy tu Agente Dietético personal\n\n"
             "📸 Envíame una foto de tu comida y te diré:\n"
@@ -68,7 +70,14 @@ class DietAgentWebhook:
             "🌐 **Estoy funcionando en la nube!** 🌐\n\n"
             "¡Empezemos! Envía una foto de tu comida 🍽️"
         )
-        await update.message.reply_text(welcome_message, parse_mode='Markdown')
+        
+        try:
+            await update.message.reply_text(welcome_message, parse_mode='Markdown')
+            logger.info("Mensaje de bienvenida enviado exitosamente")
+        except Exception as e:
+            logger.error(f"Error enviando mensaje de bienvenida: {e}")
+            # Intentar sin markdown como fallback
+            await update.message.reply_text(welcome_message.replace('*', ''))
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Comando /help - Instrucciones de uso"""
@@ -188,10 +197,18 @@ class DietAgentWebhook:
     async def process_update(self, update_data):
         """Procesar update de Telegram"""
         try:
+            logger.info(f"Procesando update: {update_data}")
             update = Update.de_json(update_data, self.bot)
+            
+            if update and update.message:
+                logger.info(f"Mensaje recibido: {update.message.text if update.message.text else 'foto/archivo'}")
+            
             await self.application.process_update(update)
+            logger.info("Update procesado exitosamente")
         except Exception as e:
             logger.error(f"Error procesando update: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
 # Crear instancia global
 diet_agent = DietAgentWebhook()
@@ -201,16 +218,22 @@ def webhook():
     """Endpoint para recibir updates de Telegram"""
     try:
         update_data = request.get_json()
+        logger.info(f"Webhook recibido: {update_data}")
         
-        # Procesar el update en un hilo separado para evitar timeouts
-        def run_async():
+        # Procesar el update de forma síncrona pero rápida
+        if update_data:
+            # Crear un nuevo loop para esta request
+            import asyncio
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(diet_agent.process_update(update_data))
-            loop.close()
-        
-        thread = Thread(target=run_async)
-        thread.start()
+            
+            try:
+                # Procesar el update
+                loop.run_until_complete(diet_agent.process_update(update_data))
+            except Exception as e:
+                logger.error(f"Error procesando update: {e}")
+            finally:
+                loop.close()
         
         return jsonify({"status": "ok"}), 200
     except Exception as e:
@@ -235,6 +258,39 @@ def debug_env():
         "webhook_url_set": bool(os.getenv('WEBHOOK_URL')),
         "port": os.getenv('PORT', 'not_set')
     }), 200
+
+@app.route('/test_bot', methods=['GET'])
+def test_bot():
+    """Endpoint para probar que el bot funciona"""
+    try:
+        # Obtener información del bot
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        async def get_bot_info():
+            bot_info = await diet_agent.bot.get_me()
+            return {
+                "bot_username": bot_info.username,
+                "bot_id": bot_info.id,
+                "bot_name": bot_info.first_name,
+                "can_read_all_group_messages": bot_info.can_read_all_group_messages
+            }
+        
+        bot_data = loop.run_until_complete(get_bot_info())
+        loop.close()
+        
+        return jsonify({
+            "status": "bot_connected",
+            "bot_info": bot_data
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error probando bot: {e}")
+        return jsonify({
+            "status": "bot_error", 
+            "error": str(e)
+        }), 500
 
 @app.route('/set_webhook', methods=['GET'])
 def set_webhook():
