@@ -225,25 +225,46 @@ class DietDatabase:
         if target_month is None:
             target_month = date.today()
         
-        # Primer y último día del mes
+        # Primer día del mes y último día a considerar
         month_start = target_month.replace(day=1)
-        if month_start.month == 12:
-            month_end = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        
+        # Si es el mes actual, solo hasta hoy. Si es mes pasado, todo el mes.
+        today = date.today()
+        if target_month.year == today.year and target_month.month == today.month:
+            # Mes actual: hasta hoy
+            month_end = today
+            days_to_consider = today.day
         else:
-            month_end = month_start.replace(month=month_start.month + 1, day=1)
+            # Mes pasado: todo el mes
+            if month_start.month == 12:
+                month_end = month_start.replace(year=month_start.year + 1, month=1, day=1)
+            else:
+                month_end = month_start.replace(month=month_start.month + 1, day=1)
+            days_to_consider = (month_end - month_start).days
         
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Obtener datos diarios del mes
-                cursor.execute('''
-                    SELECT date, SUM(total_calories) as daily_calories, COUNT(*) as daily_meals
-                    FROM meals 
-                    WHERE user_id = ? AND date >= ? AND date < ?
-                    GROUP BY date
-                    ORDER BY date
-                ''', (user_id, month_start.isoformat(), month_end.isoformat()))
+                # Obtener datos diarios del mes (hasta hoy si es mes actual)
+                if target_month.year == today.year and target_month.month == today.month:
+                    # Mes actual: incluir hasta hoy inclusive
+                    cursor.execute('''
+                        SELECT date, SUM(total_calories) as daily_calories, COUNT(*) as daily_meals
+                        FROM meals 
+                        WHERE user_id = ? AND date >= ? AND date <= ?
+                        GROUP BY date
+                        ORDER BY date
+                    ''', (user_id, month_start.isoformat(), month_end.isoformat()))
+                else:
+                    # Mes pasado: todo el mes
+                    cursor.execute('''
+                        SELECT date, SUM(total_calories) as daily_calories, COUNT(*) as daily_meals
+                        FROM meals 
+                        WHERE user_id = ? AND date >= ? AND date < ?
+                        GROUP BY date
+                        ORDER BY date
+                    ''', (user_id, month_start.isoformat(), month_end.isoformat()))
                 
                 daily_data = cursor.fetchall()
                 
@@ -285,10 +306,18 @@ class DietDatabase:
                     # Peor día: más alejado de la meta
                     worst_day = max(daily_data, key=lambda x: abs(x[1] - daily_goal))
                 
+                # Nombres de meses en español
+                month_names_es = {
+                    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+                    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto", 
+                    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+                }
+                month_name_es = f"{month_names_es[month_start.month]} {month_start.year}"
+                
                 return {
                     "month": month_start.strftime("%Y-%m"),
-                    "month_name": month_start.strftime("%B %Y"),
-                    "days_in_month": (month_end - month_start).days,
+                    "month_name": month_name_es,
+                    "days_in_month": days_to_consider,
                     "days_tracked": days_with_data,
                     "total_calories": total_calories,
                     "total_meals": total_meals,
@@ -325,9 +354,17 @@ class DietDatabase:
                 
         except Exception as e:
             logger.error(f"Error obteniendo resumen mensual: {e}")
+            # Nombres de meses en español para el caso de error también
+            month_names_es = {
+                1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+                5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto", 
+                9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+            }
+            month_name_es = f"{month_names_es[target_month.month]} {target_month.year}"
+            
             return {
                 "month": target_month.strftime("%Y-%m"),
-                "month_name": target_month.strftime("%B %Y"),
+                "month_name": month_name_es,
                 "days_in_month": 0,
                 "days_tracked": 0,
                 "total_calories": 0,
