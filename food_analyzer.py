@@ -69,9 +69,9 @@ class FoodAnalyzer:
             with open(image_path, "rb") as image_file:
                 image_data = base64.b64encode(image_file.read()).decode('utf-8')
             
-            # Llamada a OpenAI Vision API
+            # Llamada a OpenAI Vision API con modelo actualizado
             response = self.client.chat.completions.create(
-                model="gpt-4-vision-preview",
+                model="gpt-4o",  # Modelo actual que reemplaza gpt-4-vision-preview
                 messages=[
                     {
                         "role": "system",
