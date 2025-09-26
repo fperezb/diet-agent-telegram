@@ -29,7 +29,9 @@ class FoodAnalyzer:
         2. Estimación de porciones/cantidades
         3. Descripción del plato si es una preparación específica
         
-        Responde SIEMPRE en formato JSON con esta estructura:
+        IMPORTANTE: Responde ÚNICAMENTE con JSON válido, sin bloques de código markdown, sin ```json ni ```.
+        
+        Usa exactamente esta estructura JSON:
         {
             "foods": [
                 {
@@ -100,9 +102,23 @@ class FoodAnalyzer:
             
             # Extraer respuesta
             content = response.choices[0].message.content.strip()
+            logger.info(f"Respuesta cruda de OpenAI: {content}")
             
-            # Intentar parsear JSON
+            # Limpiar contenido si viene envuelto en markdown
             import json
+            import re
+            
+            # Remover bloques de código markdown si existen
+            if "```json" in content:
+                # Extraer solo el contenido JSON del bloque markdown
+                json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
+                if json_match:
+                    content = json_match.group(1).strip()
+                    logger.info(f"JSON extraído del markdown: {content}")
+                else:
+                    # Si no encuentra el patrón, intentar remover las marcas manualmente
+                    content = content.replace("```json", "").replace("```", "").strip()
+            
             try:
                 result = json.loads(content)
                 
@@ -121,7 +137,7 @@ class FoodAnalyzer:
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Error parseando JSON de OpenAI: {e}")
-                logger.error(f"Contenido recibido: {content}")
+                logger.error(f"Contenido recibido después de limpieza: {content}")
                 return None
             
         except Exception as e:
