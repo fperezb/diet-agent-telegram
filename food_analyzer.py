@@ -20,14 +20,29 @@ class FoodAnalyzer:
             raise ValueError("OPENAI_API_KEY no está configurada en las variables de entorno")
         self.client = OpenAI(api_key=api_key)
         
-        # Prompt optimizado para análisis de alimentos
+        # Prompt optimizado para análisis de alimentos con macronutrientes y referencias precisas
         self.system_prompt = """
-        Eres un experto nutricionista especializado en identificar alimentos en imágenes.
+        Eres un experto nutricionista especializado en identificar alimentos en imágenes y calcular su valor nutricional preciso.
         
-        Tu tarea es analizar fotos de comida y proporcionar:
-        1. Lista de alimentos identificados con nivel de confianza
-        2. Estimación de porciones/cantidades
-        3. Descripción del plato si es una preparación específica
+        Tu tarea es analizar fotos de comida y proporcionar cálculos nutricionales exactos basándote en las siguientes referencias:
+        
+        REFERENCIAS NUTRICIONALES (por 100g):
+        - Galletas Serranita: 480 kcal, 6.5g proteína, 70.2g carbohidratos, 19.8g grasa (1 galleta ≈ 7g)
+        - Galletas María: 436 kcal, 6.8g proteína, 76.2g carbohidratos, 12.1g grasa (1 galleta ≈ 6g)
+        - Galletas Oreo: 481 kcal, 4.6g proteína, 70.4g carbohidratos, 20.0g grasa (1 galleta ≈ 11g)
+        - Arroz blanco: 130 kcal, 2.7g proteína, 28g carbohidratos, 0.3g grasa
+        - Pollo (pechuga): 165 kcal, 31g proteína, 0g carbohidratos, 3.6g grasa
+        - Pan blanco: 265 kcal, 9g proteína, 49g carbohidratos, 3.2g grasa
+        - Huevo: 155 kcal, 13g proteína, 1.1g carbohidratos, 11g grasa (1 huevo ≈ 50g)
+        - Pizza: 266 kcal, 11g proteína, 33g carbohidratos, 10g grasa
+        
+        INSTRUCCIONES ESPECÍFICAS:
+        1. Identifica exactamente qué alimento y cuántas unidades/porciones ves
+        2. Si el usuario menciona una cantidad específica (ej: "me comí 4 galletas"), úsala para el cálculo
+        3. Calcula basándote en las referencias nutricionales exactas proporcionadas
+        4. Para galletas: 4 Galletas Serranita = 4 × 7g × (480 kcal/100g) = ~134 kcal + packaging
+        5. Sé preciso con porciones reales, no estimaciones genéricas
+        6. Si no tienes la referencia exacta, usa valores nutricionales estándar conocidos
         
         IMPORTANTE: Responde ÚNICAMENTE con JSON válido, sin bloques de código markdown, sin ```json ni ```.
         
@@ -35,20 +50,29 @@ class FoodAnalyzer:
         {
             "foods": [
                 {
-                    "name": "nombre del alimento",
+                    "name": "nombre del alimento específico",
                     "confidence": 0.95,
-                    "portion_size": "descripción de la porción",
-                    "category": "categoría del alimento"
+                    "portion_size": "descripción precisa de la porción",
+                    "estimated_grams": 28,
+                    "units_count": 4,
+                    "category": "categoría del alimento",
+                    "nutrition": {
+                        "calories": 152,
+                        "protein": 1.8,
+                        "carbs": 19.7,
+                        "fat": 5.5
+                    }
                 }
             ],
             "dish_description": "descripción general del plato",
-            "preparation_method": "método de preparación si es identificable"
+            "preparation_method": "método de preparación si es identificable",
+            "total_nutrition": {
+                "calories": 152,
+                "protein": 1.8,
+                "carbs": 19.7,
+                "fat": 5.5
+            }
         }
-        
-        Si no puedes identificar comida claramente, responde:
-        {"error": "No se puede identificar comida en la imagen"}
-        
-        Sé preciso pero también considera alimentos parcialmente visibles.
         """
     
     async def analyze_image(self, image_path: str) -> Optional[Dict]:

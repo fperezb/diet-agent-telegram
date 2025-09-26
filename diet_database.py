@@ -34,10 +34,16 @@ class DietDatabase:
                         datetime TEXT NOT NULL,
                         foods_identified TEXT NOT NULL,
                         total_calories INTEGER NOT NULL,
+                        total_protein REAL DEFAULT 0,
+                        total_carbs REAL DEFAULT 0,
+                        total_fat REAL DEFAULT 0,
                         photo_file_id TEXT,
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+                
+                # Migración: agregar columnas de macronutrientes si no existen
+                self._migrate_macronutrients_columns(cursor)
                 
                 # Tabla para configuración de usuarios (metas, preferencias)
                 cursor.execute('''
@@ -69,7 +75,32 @@ class DietDatabase:
             logger.error(f"Error inicializando base de datos: {e}")
             raise
     
-    def save_meal(self, user_id: int, foods: List[Dict], total_calories: int, photo_file_id: str = None) -> int:
+    def _migrate_macronutrients_columns(self, cursor):
+        """Migrar la base de datos para agregar columnas de macronutrientes"""
+        try:
+            # Verificar si ya existen las columnas
+            cursor.execute("PRAGMA table_info(meals)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            # Agregar columnas de macronutrientes si no existen
+            if 'total_protein' not in columns:
+                cursor.execute('ALTER TABLE meals ADD COLUMN total_protein REAL DEFAULT 0')
+                logger.info("Agregada columna total_protein")
+            
+            if 'total_carbs' not in columns:
+                cursor.execute('ALTER TABLE meals ADD COLUMN total_carbs REAL DEFAULT 0')
+                logger.info("Agregada columna total_carbs")
+            
+            if 'total_fat' not in columns:
+                cursor.execute('ALTER TABLE meals ADD COLUMN total_fat REAL DEFAULT 0')
+                logger.info("Agregada columna total_fat")
+                
+        except Exception as e:
+            logger.error(f"Error en migración de macronutrientes: {e}")
+    
+    def save_meal(self, user_id: int, foods: List[Dict], total_calories: int, 
+                 total_protein: float = 0, total_carbs: float = 0, total_fat: float = 0,
+                 photo_file_id: str = None) -> int:
         """
         Guardar una comida en la base de datos
         
@@ -77,6 +108,9 @@ class DietDatabase:
             user_id: ID del usuario de Telegram
             foods: Lista de alimentos identificados con sus datos
             total_calories: Total de calorías de la comida
+            total_protein: Total de proteínas en gramos
+            total_carbs: Total de carbohidratos en gramos
+            total_fat: Total de grasas en gramos
             photo_file_id: ID del archivo de foto en Telegram
             
         Returns:
@@ -93,14 +127,17 @@ class DietDatabase:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
-                    INSERT INTO meals (user_id, date, datetime, foods_identified, total_calories, photo_file_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (user_id, today, now.isoformat(), foods_text, total_calories, photo_file_id))
+                    INSERT INTO meals (user_id, date, datetime, foods_identified, total_calories, 
+                                     total_protein, total_carbs, total_fat, photo_file_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (user_id, today, now.isoformat(), foods_text, total_calories, 
+                      total_protein, total_carbs, total_fat, photo_file_id))
                 
                 meal_id = cursor.lastrowid
                 conn.commit()
                 
-                logger.info(f"Comida guardada: Usuario {user_id}, {total_calories} cal, ID {meal_id}")
+                logger.info(f"Comida guardada: Usuario {user_id}, {total_calories} cal, "
+                           f"P:{total_protein}g C:{total_carbs}g F:{total_fat}g, ID {meal_id}")
                 return meal_id
                 
         except Exception as e:
@@ -127,9 +164,9 @@ class DietDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Obtener todas las comidas del día
+                # Obtener todas las comidas del día con macronutrientes
                 cursor.execute('''
-                    SELECT datetime, foods_identified, total_calories
+                    SELECT datetime, foods_identified, total_calories, total_protein, total_carbs, total_fat
                     FROM meals 
                     WHERE user_id = ? AND date = ?
                     ORDER BY datetime
@@ -139,6 +176,9 @@ class DietDatabase:
                 
                 # Calcular totales
                 total_calories = sum(meal[2] for meal in meals)
+                total_protein = sum(meal[3] or 0 for meal in meals)  # Handle None values
+                total_carbs = sum(meal[4] or 0 for meal in meals)
+                total_fat = sum(meal[5] or 0 for meal in meals)
                 meal_count = len(meals)
                 
                 # Obtener la última comida
@@ -150,13 +190,19 @@ class DietDatabase:
                 return {
                     "date": date_str,
                     "total_calories": total_calories,
+                    "total_protein": round(total_protein, 1),
+                    "total_carbs": round(total_carbs, 1),
+                    "total_fat": round(total_fat, 1),
                     "meal_count": meal_count,
                     "last_meal_time": last_meal_time,
                     "meals": [
                         {
                             "time": datetime.fromisoformat(meal[0]).strftime("%H:%M"),
                             "foods": meal[1],
-                            "calories": meal[2]
+                            "calories": meal[2],
+                            "protein": round(meal[3] or 0, 1),
+                            "carbs": round(meal[4] or 0, 1),
+                            "fat": round(meal[5] or 0, 1)
                         }
                         for meal in meals
                     ]
@@ -167,6 +213,9 @@ class DietDatabase:
             return {
                 "date": date_str,
                 "total_calories": 0,
+                "total_protein": 0,
+                "total_carbs": 0,
+                "total_fat": 0,
                 "meal_count": 0,
                 "last_meal_time": None,
                 "meals": []

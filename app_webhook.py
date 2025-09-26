@@ -212,15 +212,24 @@ class DietAgentWebhook:
                 # Verificar meta calórica ANTES de guardar
                 goal_check = self.database.check_calorie_limit(user_id, calorie_info['total_calories'])
                 
-                # Guardar en base de datos
+                # Guardar en base de datos con macronutrientes
                 try:
+                    # Extraer macronutrientes del breakdown
+                    breakdown = calorie_info.get('breakdown', {})
+                    protein = float(breakdown.get('Proteína', '0g').replace('g', ''))
+                    carbs = float(breakdown.get('Carbohidratos', '0g').replace('g', ''))
+                    fat = float(breakdown.get('Grasas', '0g').replace('g', ''))
+                    
                     meal_id = self.database.save_meal(
                         user_id=user_id,
                         foods=food_analysis.get('foods', []),
                         total_calories=calorie_info['total_calories'],
+                        total_protein=protein,
+                        total_carbs=carbs,
+                        total_fat=fat,
                         photo_file_id=photo.file_id
                     )
-                    logger.info(f"Comida guardada en BD: meal_id={meal_id}")
+                    logger.info(f"Comida guardada en BD: meal_id={meal_id} con macros P:{protein}g C:{carbs}g F:{fat}g")
                 except Exception as e:
                     logger.error(f"Error guardando comida en BD: {e}")
                 
@@ -268,6 +277,13 @@ class DietAgentWebhook:
         if daily_stats and daily_stats.get('total_calories', 0) > 0:
             response += f"📊 *Total del día:* {daily_stats['total_calories']} kcal\n"
             response += f"🍽️ *Comidas registradas hoy:* {daily_stats['meal_count']}\n"
+            
+            # Agregar macronutrientes diarios
+            if daily_stats.get('total_protein', 0) > 0:
+                response += f"📈 *Macros del día:*\n"
+                response += f"• Proteína: {daily_stats['total_protein']}g\n"
+                response += f"• Carbohidratos: {daily_stats['total_carbs']}g\n"
+                response += f"• Grasas: {daily_stats['total_fat']}g\n"
         
         # Agregar información de meta y alertas
         if goal_check and goal_check.get('has_goal'):
