@@ -192,6 +192,10 @@ class DietAgentWebhook:
             # Obtener la foto de mayor calidad
             photo = update.message.photo[-1]
             
+            # Capturar el texto/caption que escribió el usuario con la foto
+            user_text = update.message.caption or ""
+            logger.info(f"Usuario escribió con la foto: '{user_text}'")
+            
             # Descargar la foto
             file = await context.bot.get_file(photo.file_id)
             photo_path = f"temp_photos/{photo.file_id}.jpg"
@@ -202,8 +206,8 @@ class DietAgentWebhook:
             # Descargar imagen
             await file.download_to_drive(photo_path)
             
-            # Analizar la imagen con IA
-            food_analysis = await self.food_analyzer.analyze_image(photo_path)
+            # Analizar la imagen con IA incluyendo el texto del usuario
+            food_analysis = await self.food_analyzer.analyze_image(photo_path, user_text)
             
             if food_analysis:
                 # Calcular calorías

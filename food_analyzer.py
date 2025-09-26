@@ -75,7 +75,7 @@ class FoodAnalyzer:
         }
         """
     
-    async def analyze_image(self, image_path: str) -> Optional[Dict]:
+    async def analyze_image(self, image_path: str, user_text: str = "") -> Optional[Dict]:
         """
         Analizar imagen de comida usando OpenAI Vision API
         
@@ -108,7 +108,14 @@ class FoodAnalyzer:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Analiza esta imagen de comida e identifica todos los alimentos visibles."
+                                "text": f"""Analiza esta imagen de comida e identifica todos los alimentos visibles.
+
+INFORMACIÓN ADICIONAL DEL USUARIO: {user_text if user_text.strip() else "No se proporcionó información adicional"}
+
+INSTRUCCIONES IMPORTANTES:
+- Si el usuario menciona específicamente qué tipo de carne/alimento es (ej: "cerdo", "pollo", "pescado"), PRIORÍZALO sobre tu identificación visual
+- Si el usuario dice cantidad específica, úsala para el cálculo (ej: "4 galletas", "2 huevos")
+- Combina la información visual con lo que dice el usuario para el análisis más preciso"""
                             },
                             {
                                 "type": "image_url",

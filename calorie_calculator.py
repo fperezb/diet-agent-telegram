@@ -128,28 +128,21 @@ class CalorieCalculator:
     
     def calculate_calories(self, food_analysis: Dict) -> Dict:
         """
-        Calcular calorías totales y desglose nutricional
+        Procesar análisis nutricional de OpenAI (sin cálculos propios)
         
         Args:
-            food_analysis: Análisis de alimentos de FoodAnalyzer
+            food_analysis: Análisis completo de alimentos de OpenAI
             
         Returns:
-            Diccionario con información calórica y nutricional
+            Diccionario con información nutricional de OpenAI
         """
         if not food_analysis or 'foods' not in food_analysis:
             return self._empty_result()
         
-        total_calories = 0
-        total_protein = 0
-        total_carbs = 0
-        total_fat = 0
-        identified_foods = []
-        unidentified_foods = []
-        
-        # PRIORIDAD TOTAL A OPENAI: Usar información nutricional de OpenAI como fuente principal
+        # USAR SOLO INFORMACIÓN DE OPENAI - Sin cálculos propios
         if 'total_nutrition' in food_analysis:
             openai_nutrition = food_analysis['total_nutrition']
-            logger.info("✅ Usando información nutricional COMPLETA de OpenAI (más precisa)")
+            logger.info("✅ Usando SOLO información nutricional de OpenAI (sin cálculos propios)")
             return {
                 'total_calories': round(openai_nutrition.get('calories', 0)),
                 'breakdown': {
@@ -173,103 +166,38 @@ class CalorieCalculator:
                     openai_nutrition.get('carbs', 0),
                     openai_nutrition.get('fat', 0)
                 ),
-                'source': 'OpenAI (análisis preciso)'
+                'source': 'OpenAI'
             }
         
-        # Si OpenAI proporciona nutrición individual por alimento, usarla directamente
-        has_individual_nutrition = any('nutrition' in food for food in food_analysis.get('foods', []))
+        # Fallback básico solo si OpenAI no proporciona total_nutrition
+        logger.warning("❌ OpenAI no proporcionó total_nutrition, usando datos básicos de la respuesta")
         
-        if has_individual_nutrition:
-            logger.info("✅ Usando información nutricional INDIVIDUAL de OpenAI")
-            for food in food_analysis['foods']:
-                if 'nutrition' in food:
-                    nutrition = food['nutrition']
-                    calories = nutrition.get('calories', 0)
-                    protein = nutrition.get('protein', 0)
-                    carbs = nutrition.get('carbs', 0)
-                    fat = nutrition.get('fat', 0)
-                    
-                    # No aplicar ajustes - confiar 100% en OpenAI
-                    total_calories += calories
-                    total_protein += protein
-                    total_carbs += carbs
-                    total_fat += fat
-                    
-                    identified_foods.append({
-                        'name': food['name'],
-                        'calories': round(calories),
-                        'portion_grams': food.get('estimated_grams', 0),
-                        'units_count': food.get('units_count', 0),
-                        'confidence': food.get('confidence', 1.0)
-                    })
-                    
-                    logger.info(f"✅ OpenAI: {food['name']} = {calories} kcal (P:{protein}g, C:{carbs}g, F:{fat}g)")
-                else:
-                    # Fallback solo si OpenAI no proporciona este alimento específico
-                    unidentified_foods.append(food['name'])
-                    logger.warning(f"⚠️ OpenAI no proporcionó nutrición para: {food['name']}")
-        else:
-            # FALLBACK: Solo usar base de datos local si OpenAI no proporciona nada
-            logger.warning("⚠️ OpenAI no proporcionó información nutricional, usando base de datos local como fallback")
-            for food in food_analysis['foods']:
-                food_name = food['name'].lower()
-                confidence = food.get('confidence', 0)
-                
-                # Buscar en base de datos local
-                nutrition_info = self._find_nutrition_info(food_name)
-                
-                if nutrition_info:
-                    # Estimar porción
-                    portion_grams = self._estimate_portion_size(food_name, food.get('portion_size', ''))
-                    
-                    # Calcular nutrientes para esta porción
-                    calories = (nutrition_info['calories'] * portion_grams) / 100
-                    protein = (nutrition_info['protein'] * portion_grams) / 100
-                    carbs = (nutrition_info['carbs'] * portion_grams) / 100
-                    fat = (nutrition_info['fat'] * portion_grams) / 100
-                    
-                    # Ajustar por confianza solo cuando usamos base local
-                    calories *= confidence
-                    protein *= confidence
-                    carbs *= confidence
-                    fat *= confidence
-                    
-                    logger.info(f"📊 Base local: {food_name} = {calories} kcal (estimado)")
-                else:
-                    # Alimento completamente desconocido
-                    calories = 50
-                    protein = carbs = fat = 0
-                    unidentified_foods.append(food['name'])
-                    logger.warning(f"❌ Alimento no identificado: {food_name}")
-                
-                total_calories += calories
-                total_protein += protein
-                total_carbs += carbs
-                total_fat += fat
-                
-                identified_foods.append({
-                    'name': food['name'],
-                    'calories': round(calories),
-                    'portion_grams': portion_grams if nutrition_info else 0,
-                    'confidence': confidence
-                })
+        # Extraer información básica de los alimentos identificados
+        identified_foods = []
+        total_calories = 0
         
-        # Agregar estimación para alimentos no identificados
-        if unidentified_foods:
-            estimated_calories = len(unidentified_foods) * 50  # 50 cal por alimento desconocido
-            total_calories += estimated_calories
+        for food in food_analysis.get('foods', []):
+            food_calories = food.get('nutrition', {}).get('calories', 0) if 'nutrition' in food else 0
+            total_calories += food_calories
+            
+            identified_foods.append({
+                'name': food['name'],
+                'calories': food_calories,
+                'confidence': food.get('confidence', 1.0)
+            })
         
+        # Resultado mínimo si no hay información completa
         result = {
-            'total_calories': round(total_calories),
+            'total_calories': round(total_calories) if total_calories > 0 else 100,  # Estimación mínima
             'breakdown': {
-                'Proteína': f"{round(total_protein, 1)}g",
-                'Carbohidratos': f"{round(total_carbs, 1)}g",
-                'Grasas': f"{round(total_fat, 1)}g"
+                'Proteína': '0g',
+                'Carbohidratos': '0g', 
+                'Grasas': '0g'
             },
             'identified_foods': identified_foods,
-            'unidentified_foods': unidentified_foods,
-            'source': 'Base de datos local (fallback)' if not has_individual_nutrition else 'OpenAI + Base local',
-            'tips': self._generate_tips(total_calories, total_protein, total_carbs, total_fat)
+            'unidentified_foods': [],
+            'source': 'OpenAI (parcial)',
+            'tips': self._generate_tips(total_calories, 0, 0, 0)  # Sin macronutrientes en fallback
         }
         
         logger.info(f"Cálculo de calorías completado: {total_calories} kcal")
