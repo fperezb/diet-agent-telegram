@@ -5,9 +5,12 @@ Maneja el almacenamiento de comidas y cálculo de calorías diarias
 
 import sqlite3
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from typing import List, Dict, Optional
 import logging
+
+# Timezone de Chile (UTC-3)
+CHILE_TIMEZONE = timezone(timedelta(hours=-3))
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,14 @@ class DietDatabase:
         """
         self.db_path = db_path
         self.init_database()
+    
+    def get_chile_datetime(self):
+        """Obtener fecha y hora actual de Chile (UTC-3)"""
+        return datetime.now(CHILE_TIMEZONE)
+    
+    def get_chile_date(self):
+        """Obtener fecha actual de Chile"""
+        return self.get_chile_datetime().date()
     
     def init_database(self):
         """Crear las tablas necesarias si no existen"""
@@ -117,8 +128,8 @@ class DietDatabase:
             ID de la comida guardada
         """
         try:
-            now = datetime.now()
-            today = date.today().isoformat()
+            now = self.get_chile_datetime()
+            today = self.get_chile_date().isoformat()
             
             # Convertir la lista de alimentos a texto
             foods_text = ", ".join([f"{food['name']} ({food.get('confidence', 0):.0%})" for food in foods])
@@ -156,7 +167,7 @@ class DietDatabase:
             Dict con información del día
         """
         if target_date is None:
-            target_date = date.today()
+            target_date = self.get_chile_date()
         
         date_str = target_date.isoformat()
         
