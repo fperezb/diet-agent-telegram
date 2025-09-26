@@ -113,6 +113,7 @@ class DietAgentWebhook:
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("setmeta", self.set_goal_command))
         self.application.add_handler(CommandHandler("mensual", self.monthly_stats_command))
+        self.application.add_handler(CommandHandler("clear_my_data", self.clear_user_data_command))
         self.application.add_handler(MessageHandler(filters.PHOTO, self.analyze_food_photo))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
     
@@ -888,6 +889,44 @@ def set_webhook():
     except Exception as e:
         logger.error(f"Error configurando webhook: {e}")
         return jsonify({"error": str(e)}), 500
+
+    async def clear_user_data_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /clear_my_data - Eliminar todos los datos del usuario"""
+        user_id = update.effective_user.id
+        logger.info(f"Comando /clear_my_data recibido de usuario: {user_id}")
+        
+        # Verificar autorización
+        if not self.is_user_authorized(user_id):
+            await self.send_unauthorized_message(update)
+            return
+        
+        try:
+            # Mostrar información antes de limpiar
+            await update.message.reply_text(
+                f"🆔 *Tu ID de usuario:* `{user_id}`\n\n"
+                "🧹 Limpiando todos tus datos...",
+                parse_mode='Markdown'
+            )
+            
+            # Limpiar datos del usuario
+            deleted_count = self.database.delete_user_data(user_id)
+            
+            await update.message.reply_text(
+                f"✅ *Datos eliminados exitosamente*\n\n"
+                f"📊 Registros eliminados: {deleted_count}\n"
+                f"🆔 Usuario: {user_id}\n\n"
+                "Ahora puedes empezar desde cero con fechas correctas de Chile 🇨🇱\n"
+                "Envía una nueva foto de comida para empezar.",
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Error en comando clear_my_data: {e}")
+            await update.message.reply_text(
+                f"❌ Error eliminando datos: {e}\n\n"
+                f"Tu ID de usuario es: `{user_id}`",
+                parse_mode='Markdown'
+            )
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
