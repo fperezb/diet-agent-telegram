@@ -20,57 +20,49 @@ class FoodAnalyzer:
             raise ValueError("OPENAI_API_KEY no está configurada en las variables de entorno")
         self.client = OpenAI(api_key=api_key)
         
-        # Prompt optimizado para análisis de alimentos con macronutrientes y referencias precisas
+        # Prompt optimizado para análisis de alimentos con JSON consistente
         self.system_prompt = """
-        Eres un experto nutricionista especializado en identificar alimentos en imágenes y calcular su valor nutricional preciso.
-        
-        Tu tarea es analizar fotos de comida y proporcionar cálculos nutricionales exactos basándote en las siguientes referencias:
+        Eres un experto nutricionista. Analiza la imagen y responde SOLO con JSON válido.
         
         REFERENCIAS NUTRICIONALES (por 100g):
-        - Galletas Serranita: 480 kcal, 6.5g proteína, 70.2g carbohidratos, 19.8g grasa (1 galleta ≈ 7g)
-        - Galletas María: 436 kcal, 6.8g proteína, 76.2g carbohidratos, 12.1g grasa (1 galleta ≈ 6g)
-        - Galletas Oreo: 481 kcal, 4.6g proteína, 70.4g carbohidratos, 20.0g grasa (1 galleta ≈ 11g)
-        - Arroz blanco: 130 kcal, 2.7g proteína, 28g carbohidratos, 0.3g grasa
-        - Pollo (pechuga): 165 kcal, 31g proteína, 0g carbohidratos, 3.6g grasa
-        - Pan blanco: 265 kcal, 9g proteína, 49g carbohidratos, 3.2g grasa
-        - Huevo: 155 kcal, 13g proteína, 1.1g carbohidratos, 11g grasa (1 huevo ≈ 50g)
-        - Pizza: 266 kcal, 11g proteína, 33g carbohidratos, 10g grasa
+        - Pan: 265 kcal, 9g proteína, 49g carbohidratos, 3.2g grasa
+        - Queso: 402 kcal, 25g proteína, 1.3g carbohidratos, 33g grasa  
+        - Mantequilla: 717 kcal, 0.9g proteína, 0.1g carbohidratos, 81g grasa
+        - Café: 2 kcal, 0.3g proteína, 0g carbohidratos, 0g grasa
+        - Galletas Serranita: 480 kcal, 6.5g proteína, 70.2g carbohidratos, 19.8g grasa
         
-        INSTRUCCIONES ESPECÍFICAS:
-        1. Identifica exactamente qué alimento y cuántas unidades/porciones ves
-        2. Si el usuario menciona una cantidad específica (ej: "me comí 4 galletas"), úsala para el cálculo
-        3. Calcula basándote en las referencias nutricionales exactas proporcionadas
-        4. Para galletas: 4 Galletas Serranita = 4 × 7g × (480 kcal/100g) = ~134 kcal + packaging
-        5. Sé preciso con porciones reales, no estimaciones genéricas
-        6. Si no tienes la referencia exacta, usa valores nutricionales estándar conocidos
+        INSTRUCCIONES CRÍTICAS:
+        1. Responde SOLO JSON válido, sin texto adicional
+        2. No uses markdown (```json)
+        3. No duplicar propiedades en el JSON
+        4. Usa las referencias nutricionales para cálculos precisos
+        5. Si el usuario especifica cantidades, úsalas
         
-        IMPORTANTE: Responde ÚNICAMENTE con JSON válido, sin bloques de código markdown, sin ```json ni ```.
-        
-        Usa exactamente esta estructura JSON:
+        FORMATO REQUERIDO (copia exactamente esta estructura):
         {
             "foods": [
                 {
-                    "name": "nombre del alimento específico",
+                    "name": "nombre_del_alimento",
                     "confidence": 0.95,
-                    "portion_size": "descripción precisa de la porción",
-                    "estimated_grams": 28,
-                    "units_count": 4,
-                    "category": "categoría del alimento",
+                    "portion_size": "descripción_porción",
+                    "estimated_grams": 60,
+                    "units_count": 1,
+                    "category": "categoría",
                     "nutrition": {
-                        "calories": 152,
-                        "protein": 1.8,
-                        "carbs": 19.7,
-                        "fat": 5.5
+                        "calories": 150,
+                        "protein": 5.0,
+                        "carbs": 20.0,
+                        "fat": 8.0
                     }
                 }
             ],
-            "dish_description": "descripción general del plato",
-            "preparation_method": "método de preparación si es identificable",
+            "dish_description": "descripción del plato",
+            "preparation_method": "método de preparación",
             "total_nutrition": {
-                "calories": 152,
-                "protein": 1.8,
-                "carbs": 19.7,
-                "fat": 5.5
+                "calories": 150,
+                "protein": 5.0,
+                "carbs": 20.0,
+                "fat": 8.0
             }
         }
         """
@@ -135,44 +127,124 @@ INSTRUCCIONES IMPORTANTES:
             content = response.choices[0].message.content.strip()
             logger.info(f"Respuesta cruda de OpenAI: {content}")
             
-            # Limpiar contenido si viene envuelto en markdown
+            # Parser robusto para JSON de OpenAI
             import json
             import re
             
-            # Remover bloques de código markdown si existen
+            # Limpiar contenido de markdown
             if "```json" in content:
-                # Extraer solo el contenido JSON del bloque markdown
                 json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
                 if json_match:
                     content = json_match.group(1).strip()
-                    logger.info(f"JSON extraído del markdown: {content}")
                 else:
-                    # Si no encuentra el patrón, intentar remover las marcas manualmente
                     content = content.replace("```json", "").replace("```", "").strip()
             
+            # Intentar parsear JSON
             try:
                 result = json.loads(content)
                 
-                # Verificar si hay error
+                # Verificar estructura
                 if "error" in result:
-                    logger.warning(f"No se pudo analizar la imagen: {result['error']}")
+                    logger.warning(f"Error en análisis: {result['error']}")
                     return None
                 
-                # Validar estructura básica
                 if "foods" not in result:
-                    logger.error("Respuesta de OpenAI sin formato esperado")
+                    logger.error("Respuesta sin formato esperado")
                     return None
                 
-                logger.info(f"Análisis exitoso: {len(result['foods'])} alimentos identificados")
+                logger.info(f"✅ Análisis exitoso: {len(result['foods'])} alimentos")
                 return result
                 
             except json.JSONDecodeError as e:
-                logger.error(f"Error parseando JSON de OpenAI: {e}")
-                logger.error(f"Contenido recibido después de limpieza: {content}")
+                logger.error(f"❌ JSON inválido de OpenAI: {e}")
+                logger.error(f"📋 Contenido problemático: {content[:500]}...")
+                
+                # Fallback: intentar extraer información básica
+                return self._create_fallback_response(content)
+            
+            except Exception as e:
+                logger.error(f"❌ Error inesperado parseando respuesta: {e}")
                 return None
             
         except Exception as e:
             logger.error(f"Error en análisis de imagen: {e}")
+            return None
+    
+    def _create_fallback_response(self, content: str) -> Optional[Dict]:
+        """Crear respuesta básica cuando JSON está malformado"""
+        try:
+            # Buscar información básica en el texto
+            import re
+            
+            # Buscar alimentos mencionados
+            food_patterns = [
+                r'"name"\s*:\s*"([^"]+)"',
+                r"'name'\s*:\s*'([^']+)'"
+            ]
+            
+            foods_found = []
+            for pattern in food_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                foods_found.extend(matches)
+            
+            # Buscar calorías
+            calorie_patterns = [
+                r'"calories"\s*:\s*(\d+)',
+                r"'calories'\s*:\s*(\d+)"
+            ]
+            
+            total_calories = 0
+            for pattern in calorie_patterns:
+                matches = re.findall(pattern, content)
+                if matches:
+                    total_calories = sum(int(cal) for cal in matches)
+                    break
+            
+            if foods_found or total_calories > 0:
+                logger.info(f"🔧 Fallback activado: {len(foods_found)} alimentos, {total_calories} kcal")
+                
+                return {
+                    "foods": [
+                        {
+                            "name": food,
+                            "confidence": 0.7,
+                            "portion_size": "estimado",
+                            "estimated_grams": 100,
+                            "category": "desconocido",
+                            "nutrition": {
+                                "calories": max(50, total_calories // max(1, len(foods_found))),
+                                "protein": 0,
+                                "carbs": 0,
+                                "fat": 0
+                            }
+                        } for food in foods_found[:3]  # Máximo 3 alimentos
+                    ] or [{
+                        "name": "alimento no identificado",
+                        "confidence": 0.5,
+                        "portion_size": "estimado",
+                        "estimated_grams": 100,
+                        "category": "desconocido",
+                        "nutrition": {
+                            "calories": max(100, total_calories),
+                            "protein": 0,
+                            "carbs": 0,
+                            "fat": 0
+                        }
+                    }],
+                    "dish_description": "Análisis recuperado de respuesta malformada",
+                    "preparation_method": "No identificado",
+                    "total_nutrition": {
+                        "calories": max(100, total_calories),
+                        "protein": 0,
+                        "carbs": 0,
+                        "fat": 0
+                    }
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error en fallback: {e}")
             return None
     
     def validate_food_analysis(self, analysis: Dict) -> bool:
